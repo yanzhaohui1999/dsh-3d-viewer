@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>dsh-3d-viewer smoke</title>
+<pre id="out">running</pre>
+<script src="./smoke.bundle.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out')
+  try {
+    const res = await fetch('../samples/cube-10mm.step')
+    if (!res.ok) throw new Error('fetch ' + res.status)
+    const buf = await res.arrayBuffer()
+    const model = await window.__dsh3dSmoke.parseModel(buf, 'step')
+    out.textContent = 'PASS triangles=' + model.triangles
+      + ' size=' + model.size.map((n) => n.toFixed(2)).join(' x ')
+  } catch (error) {
+    out.textContent = 'FAIL ' + (error && error.stack ? error.stack : error)
+  }
+})()
+</script>

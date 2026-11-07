@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>dsh-3d-viewer render smoke</title>
+<style>html,body{margin:0;background:#11161c;color:#c9d4e0;font:13px sans-serif}#root{width:900px;height:600px}</style>
+<div id="root"></div>
+<pre id="out">running</pre>
+<script>
+  window.__errs = [];
+  const _ce = console.error, _cw = console.warn;
+  console.error = (...a) => { window.__errs.push('E ' + a.map(String).join(' ')); _ce(...a); };
+  console.warn = (...a) => { window.__errs.push('W ' + a.map(String).join(' ')); _cw(...a); };
+  window.addEventListener('error', e => window.__errs.push('UE ' + (e.message || e.error)));
+  window.addEventListener('unhandledrejection', e => window.__errs.push('UR ' + (e.reason && (e.reason.stack || e.reason.message || e.reason))));
+</script>
+<script src="./vendor/react.production.min.js"></script>
+<script src="./vendor/react-dom.production.min.js"></script>
+<script>
+  window.__mods = [];
+  window.__ModuleLoader__ = { load({ id, factory }) { window.__mods.push({ id, factory }); } };
+</script>
+<script src="../lib/client.js"></script>
+<script>
+(async () => {
+  const out = document.getElementById('out')
+  const say = (s) => { out.textContent = s }
+  try {
+    const entry = window.__mods[0]
+    if (!entry) return say('FAIL: bundle never called __ModuleLoader__.load')
+    const mod = entry.factory((name) => {
+      if (name === 'react') { if (!window.React) throw new Error('React UMD 未加载'); return window.React }
+      throw new Error('unexpected require: ' + name)
+    })
+    const caps = { viewers: [], previews: [], bodies: [] }
+    const ctx = {
+      effect(fn) { return fn() },
+      inject(deps, cb) { cb(ctx) },
+      slots: {
+        inject(name, cb) { cb({ register: (def) => { caps.bodies.push(def); return () => {} } }) },
+        register(def) { caps.bodies.push(def); return () => {} },
+      },
+      documentPreviews: { register: (d) => { caps.previews.push(d); return () => {} } },
+      betterSidebar: { registerFileViewer: (d) => { caps.viewers.push(d); return () => {} } },
+      console: { warn() {} },
+    }
+    mod.apply(ctx)
+    if (!caps.viewers.length) return say('FAIL: no fileViewer registered')
+    const viewer = caps.viewers[0]
+
+    const res = await fetch('../samples/cube-10mm.step')
+    const buf = await res.arrayBuffer()
+    const el = window.React.createElement(viewer.component, { customData: { buffer: buf }, path: 'heatsink-v6.step' })
+    window.ReactDOM.createRoot(document.getElementById('root')).render(el)
+
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 250))
+      const text = (document.getElementById('root').innerText || '').replace(/\s+/g, ' ')
+      if (/三角面/.test(text)) {
+        const canvas = document.querySelector('#root canvas')
+        let painted = false
+        try {
+          const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+          if (gl) {
+            const px = new Uint8Array(4 * 64)
+            gl.readPixels(canvas.width / 2 - 4, canvas.height / 2 - 4, 8, 8, gl.RGBA, gl.UNSIGNED_BYTE, px)
+            painted = px.some((v, idx) => idx % 4 !== 3 && v > 20)
+          }
+        } catch (e) {}
+        return say('RENDER PASS · canvas=' + (canvas ? canvas.width + 'x' + canvas.height : 'none')
+          + ' · centerPainted=' + painted + ' · ' + text.slice(0, 90))
+      }
+      if (/失败|错误|Error/i.test(text)) return say('RENDER FAIL: ' + text.slice(0, 200))
+    }
+    say('RENDER TIMEOUT: ' + (document.getElementById('root').innerText || '').slice(0, 80) + ' || canvases=' + document.querySelectorAll('#root canvas').length + ' htmlLen=' + document.getElementById('root').innerHTML.length + ' errs=' + JSON.stringify(window.__errs).slice(0, 400))
+  } catch (e) {
+    say('FAIL ' + (e && e.stack ? e.stack : e))
+  }
+})()
+</script>

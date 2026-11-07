@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>dsh-3d-viewer contract smoke</title>
+<pre id="out">running</pre>
+<script>window.__ModuleLoader__ = { load(mod) { window.__mod = mod } }</script>
+<script src="../lib/client.js"></script>
+<script>
+(function () {
+  const out = document.getElementById('out')
+  try {
+    const mod = window.__mod
+    if (!mod || mod.id !== 'dsh-3d-viewer') throw new Error('loader id missing: ' + (mod && mod.id))
+    const React = {
+      createElement() { return null },
+      useRef() { return { current: null } },
+      useState() { return [undefined, () => {}] },
+      useEffect() {}, useMemo(fn) { return fn() },
+    }
+    const seen = []
+    const plugin = mod.factory((name) => {
+      seen.push(name)
+      if (name === 'react') return React
+      throw new Error('unexpected require: ' + name)
+    })
+    if (typeof plugin.apply !== 'function') throw new Error('apply missing')
+
+    const registered = { viewers: 0, previews: 0, bodies: 0 }
+    const ctx = {
+      effect(fn) { return fn() },
+      documentPreviews: { register(def) { registered.previews += 1; if (!def.extensions.includes('step')) throw new Error('ext missing'); return () => {} } },
+      slots: {
+        inject(_name, cb) { return cb() },
+        register() { registered.bodies += 1; return () => {} },
+      },
+      inject(_deps, cb) {
+        const scope = {
+          effect(fn) { return fn() },
+          betterSidebar: {
+          registerFileViewer(def) {
+            registered.viewers += 1
+            if (def.exts.indexOf('glb') < 0) throw new Error('exts missing')
+            return () => {}
+          },
+          hostRouteUrl(rel) { return '/' + rel },
+          },
+        }
+        return cb(scope)
+      },
+    }
+    plugin.apply(ctx)
+    out.textContent = 'PASS id=' + mod.id + ' inject=' + JSON.stringify(plugin.inject)
+      + ' requires=' + JSON.stringify(seen) + ' registered=' + JSON.stringify(registered)
+  } catch (error) {
+    out.textContent = 'FAIL ' + (error && error.stack ? error.stack : error)
+  }
+})()
+</script>

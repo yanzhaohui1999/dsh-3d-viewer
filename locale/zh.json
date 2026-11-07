@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "3D 模型查看器",
+    "description": "在侧栏里直接打开 STEP / STP / STL / GLB / GLTF 模型。"
+  }
+}
