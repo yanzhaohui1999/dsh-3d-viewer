@@ -137,7 +137,7 @@ npm run build     # 产出 lib/client.js
 
 ## 没验证的部分
 
-- **原生降级路径的实际观感**：注册链路已修好（见上），但隔离 profile 里装了 better-sidebar，`content.kind === 'bytes'` 的取字节没在「没有 better-sidebar」的 profile 里真跑过。
+- **原生降级路径的可视效果**：在没有 better-sidebar 的干净 profile 里实测过注册（`documentPreviews` + `slots` 两路都成功、无告警）；但那个实例没有登录/会话，没有打开文件的入口，`content.kind === 'bytes'` 的取字节与画面仍未真跑过。
 - **压缩过的 GLB/GLTF**：只验过未压缩的 `LeePerrySmith.glb`；带 DRACO / KTX2 压缩的模型会失败（没接解码器）。
 - **深色主题适配**：画布背景写死 `#11161c`，不跟随宿主主题（宿主切浅色时面板仍是深色）。
 - **单位**：底部读数一律写 `mm` —— 对 STEP/STL 成立；glTF 规范没有单位，那串数字只是模型空间尺寸。
