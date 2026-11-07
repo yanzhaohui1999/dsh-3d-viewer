@@ -2,6 +2,8 @@
 
 在 DSH 侧栏里直接打开 3D 模型：`.step` / `.stp` / `.stl` / `.glb` / `.gltf`。
 
+> 为什么：CAD 的 STEP/STL 平时只能在 FreeCAD 里看；在 DSH 里聊到模型时，文件能直接在侧栏转起来，不用切窗口、不用转格式。
+
 - **装了 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)**：在它的文件树里双击模型文件，用 3D 视图打开（`registerFileViewer`）。
 - **没装**：降级到 DSH 原生右侧栏文档预览（`documentPreviews` + `sidebar.right.tab.document`），同一个渲染器，不报错、不缺页。
 

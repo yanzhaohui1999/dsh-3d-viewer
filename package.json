@@ -1,10 +1,27 @@
 {
   "name": "dsh-3d-viewer",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "3D model viewer for DeepSeek Harness: STEP / STP / STL / GLB / GLTF in the better-sidebar file tree, with a native document-preview fallback.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yanzhaohui1999/dsh-3d-viewer.git"
+  },
+  "homepage": "https://github.com/yanzhaohui1999/dsh-3d-viewer#readme",
+  "bugs": {
+    "url": "https://github.com/yanzhaohui1999/dsh-3d-viewer/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "3d",
+    "step",
+    "stl",
+    "gltf",
+    "viewer"
+  ],
   "exports": {
     ".": "./index.js",
     "./client": "./lib/client.js",
