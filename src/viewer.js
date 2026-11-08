@@ -7,6 +7,10 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import occtimportjs from 'occt-import-js'
 import occtWasm from 'occt-import-js/dist/occt-import-js.wasm'
 
+// extOf lives in format.js so plain Node can unit-test it without importing
+// three.js or the wasm; re-exported here to keep viewer.js's surface unchanged.
+export { extOf } from './format.js'
+
 const CAD_EXTS = new Set(['step', 'stp', 'stl'])
 // World space is Y-up: the model group is rotated -90° about X on mount.
 const PRESETS = {
@@ -20,11 +24,6 @@ let occtPromise = null
 function getOcct() {
   if (!occtPromise) occtPromise = occtimportjs({ wasmBinary: occtWasm })
   return occtPromise
-}
-
-export function extOf(path) {
-  const m = /\.([a-z0-9]+)$/i.exec(String(path || ''))
-  return m ? m[1].toLowerCase() : ''
 }
 
 function meshGroupFromOcct(result) {

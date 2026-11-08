@@ -33,7 +33,8 @@
     "lib/client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "licenses/*.txt"
   ],
   "dsh": {
     "bundle": {
@@ -47,6 +48,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "verify": "node scripts/verify-step.mjs",
+    "test": "node scripts/test-extof.mjs",
     "build:smoke": "npm_config_cache=/tmp/npm-cache npx --yes esbuild@0.25.0 scripts/smoke-entry.js --bundle --format=iife --platform=browser --minify --loader:.wasm=binary --external:fs --external:path --outfile=scripts/smoke.bundle.js"
   },
   "peerDependencies": {

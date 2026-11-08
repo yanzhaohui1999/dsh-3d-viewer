@@ -41,7 +41,17 @@ export function createComponents(React) {
         return undefined
       }
       let alive = true
-      const viewer = new ModelViewer(host)
+      let viewer
+      try {
+        viewer = new ModelViewer(host)
+      } catch (error) {
+        // three's WebGLRenderer throws when no context can be created (GPU
+        // disabled, headless host, browser policy). If that escapes the effect
+        // the panel stays on 「解析中…」 forever, so surface it instead.
+        console.warn('[dsh-3d-viewer] WebGL 初始化失败：', error)
+        setState({ kind: 'error', message: '当前环境不支持 WebGL' })
+        return undefined
+      }
       viewerRef.current = viewer
       setState({ kind: 'loading' })
       parseModel(buffer, ext).then((model) => {

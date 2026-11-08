@@ -113,13 +113,16 @@ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
 | `src/module.js` | 两套注册：better-sidebar 文件预览器 + 原生文档预览；都包在 try/catch 里软降级 |
 | `src/body.js` | React 组件（工具条 / 画布 / 底部读数），React 由外部注入 |
 | `src/viewer.js` | three.js 渲染器、正交相机、四种视图、STL/GLTF/STEP 解析 |
+| `src/format.js` | 纯路径辅助（`extOf`），不依赖 three/wasm，供 Node 单测直接 import |
 | `lib/client.js` | 构建产物（10.3 MB，含内联的 three 与 OCCT wasm），**提交进目录** |
+| `licenses/` | 随包分发的第三方许可文本（OCCT / occt-import-js，LGPL-2.1） |
 | `index.js` | host 半，空 `apply()` |
 | `cordis.patch.yml` | bundle 的 `insert:` 一行 |
 | `locale/{zh,en}.json` | 插件名与说明 |
 | `icon.svg` | 插件图标 |
 | `scripts/build.mjs` | esbuild 构建（`--loader:.wasm=binary`、`--external:fs --external:path`） |
 | `scripts/verify-step.mjs` | Node 侧 STEP 验收 |
+| `scripts/test-extof.mjs` | `extOf` 单测（纯 Node，`npm test`） |
 | `scripts/smoke{,-entry}.js` + `smoke.html` | 浏览器侧解析验收（内联 wasm 走真实浏览器） |
 | `scripts/render-smoke.html` | 端到端渲染验收：真 React + 真 WebGL 挂载组件并喂真实 STEP |
 | `scripts/model-smoke.html` | STL / GLB 真文件渲染验收（`?file=` 指定，默认 `../samples/cube-10mm.stl`） |
@@ -131,9 +134,24 @@ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
 
 ```bash
 npm run build     # 产出 lib/client.js
+npm test          # extOf 单测（纯 Node）
+npm run verify    # Node 侧 STEP 验收
 ```
 
 `fs` / `path` 被标成 external：它们只出现在 emscripten 的 node-only 分支里，浏览器不会执行到；不标会让 esbuild 因为 Node 内建模块报错。
+
+## 第三方组件与许可
+
+本仓库自身以 MIT 发布（根目录 `LICENSE`）。随 `lib/client.js` 一起分发的第三方组件：
+
+| 组件 | 版本 | 许可 | 分发方式 |
+|---|---|---|---|
+| [three.js](https://threejs.org) | 0.169.0 | MIT | 构建时内联进 `lib/client.js` |
+| [occt-import-js](https://github.com/kovacsv/occt-import-js) | 0.0.23 | LGPL-2.1 | 构建时内联进 `lib/client.js`，其中含 OpenCASCADE（OCCT）编译出的 wasm |
+
+原始许可文本随包分发，见 `licenses/license.occt.txt` 与 `licenses/license.occt-import-js.txt`（`package.json` 的 `files` 已包含，安装后会落在包里）。
+
+内联的 OCCT wasm 由 `occt-import-js@0.0.23` 构建：执行 `npm i --no-save occt-import-js@0.0.23` 后 `npm run build` 即可重建。按 LGPL-2.1 的要求，你可以先用自己构建的等价 wasm 替换 `node_modules/occt-import-js/dist/occt-import-js.wasm`，再重新 `npm run build`，从而替换 `lib/client.js` 里内联的那份二进制。
 
 ## 没验证的部分
 
