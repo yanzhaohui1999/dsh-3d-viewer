@@ -6,6 +6,8 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import occtimportjs from 'occt-import-js'
 import occtWasm from 'occt-import-js/dist/occt-import-js.wasm'
+import { disposeObject3D } from './dispose.js'
+import { assertSelfContainedGltf } from './gltf.js'
 
 // extOf lives in format.js so plain Node can unit-test it without importing
 // three.js or the wasm; re-exported here to keep viewer.js's surface unchanged.
@@ -21,8 +23,19 @@ const PRESETS = {
 }
 
 let occtPromise = null
+async function createOcct() {
+  return occtimportjs({ wasmBinary: occtWasm })
+}
 function getOcct() {
-  if (!occtPromise) occtPromise = occtimportjs({ wasmBinary: occtWasm })
+  if (!occtPromise) {
+    // A failed wasm init must not be cached for the rest of the page's life:
+    // reset on rejection so the next STEP file retries instead of failing
+    // instantly forever.
+    occtPromise = createOcct().catch((error) => {
+      occtPromise = null
+      throw error
+    })
+  }
   return occtPromise
 }
 
@@ -52,6 +65,9 @@ function meshGroupFromOcct(result) {
 
 async function parseCad(buffer) {
   const occt = await getOcct()
+  // ReadStepFile is synchronous and can block for seconds on a large file.
+  // Yield once so the browser can paint the 「解析中…」 state first.
+  await new Promise((resolve) => setTimeout(resolve, 0))
   const bytes = new Uint8Array(buffer)
   const result = occt.ReadStepFile(bytes, null)
   if (!result || result.success === false) throw new Error('STEP 解析失败（OpenCASCADE 拒绝了这份文件）')
@@ -80,8 +96,13 @@ export async function parseModel(buffer, ext) {
   let group
   if (e === 'step' || e === 'stp') group = await parseCad(buffer)
   else if (e === 'stl') group = parseStl(buffer)
-  else if (e === 'glb' || e === 'gltf') group = await parseGltf(buffer)
-  else throw new Error(`不支持的格式 .${e}`)
+  else if (e === 'glb' || e === 'gltf') {
+    // A .gltf may reference external .bin/texture files, which GLTFLoader would
+    // fetch with the DSH page's own origin. Only self-contained data: URIs are
+    // accepted; .glb carries its resources in the binary chunk and is exempt.
+    if (e === 'gltf') assertSelfContainedGltf(buffer)
+    group = await parseGltf(buffer)
+  } else throw new Error(`不支持的格式 .${e}`)
 
   const box = new THREE.Box3().setFromObject(group)
   if (!isFinite(box.min.x)) throw new Error('模型为空，没有可显示的几何体')
@@ -138,9 +159,19 @@ export class ModelViewer {
     this.model = null
     this.radius = 1
     this.raf = 0
+    this.needsRender = true
+    this.disposed = false
     this.loop = this.loop.bind(this)
     this.resize = this.resize.bind(this)
-    this.raf = requestAnimationFrame(this.loop)
+    this.onVisibilityChange = this.onVisibilityChange.bind(this)
+    this.onControlsChange = () => this.requestRender()
+    // OrbitControls dispatches 'change' from its own pointer/wheel handlers;
+    // that is what wakes the idle render loop back up.
+    this.controls.addEventListener('change', this.onControlsChange)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onVisibilityChange)
+    }
+    this.startLoop()
     if (typeof ResizeObserver !== 'undefined') {
       this.ro = new ResizeObserver(this.resize)
       this.ro.observe(container)
@@ -149,10 +180,46 @@ export class ModelViewer {
     }
   }
 
-  loop() {
+  /** Hidden tabs must not keep rendering (rAF is throttled, but still wakes up). */
+  isVisible() {
+    return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+  }
+
+  requestRender() {
+    this.needsRender = true
+    this.startLoop()
+  }
+
+  startLoop() {
+    if (this.disposed || this.raf || !this.isVisible()) return
     this.raf = requestAnimationFrame(this.loop)
-    this.controls.update()
-    this.renderer.render(this.scene, this.camera)
+  }
+
+  stopLoop() {
+    if (!this.raf) return
+    cancelAnimationFrame(this.raf)
+    this.raf = 0
+  }
+
+  onVisibilityChange() {
+    if (this.isVisible()) this.requestRender()
+    else this.stopLoop()
+  }
+
+  loop() {
+    this.raf = 0
+    if (this.disposed || !this.isVisible()) return
+    // OrbitControls.update() returns true only while the camera is actually
+    // moving (including damping), so an idle panel can stop redrawing instead
+    // of burning 60 fps forever.
+    const changed = this.controls.update()
+    if (this.needsRender || changed) {
+      this.needsRender = false
+      this.renderer.render(this.scene, this.camera)
+    }
+    // Damping still needs frames; otherwise let the loop go idle until the next
+    // interaction, resize or visibility change calls requestRender().
+    if ((changed || this.needsRender) && !this.raf) this.raf = requestAnimationFrame(this.loop)
   }
 
   resize() {
@@ -160,6 +227,7 @@ export class ModelViewer {
     const h = this.container.clientHeight || 1
     this.renderer.setSize(w, h, false)
     this.applyFrustum()
+    this.requestRender()
   }
 
   applyFrustum() {
@@ -189,17 +257,17 @@ export class ModelViewer {
     this.radius = Math.max(worldSize.x, worldSize.y, worldSize.z) * 0.75 + 1
     this.applyFrustum()
     this.fit('iso')
+    this.requestRender()
   }
 
   clearModel() {
     if (!this.model) return
     this.root.clear()
-    this.model.group.traverse((node) => {
-      node.geometry?.dispose?.()
-      if (Array.isArray(node.material)) node.material.forEach((m) => m.dispose?.())
-      else node.material?.dispose?.()
-    })
+    // Geometries, materials and their textures all live on the GPU; detaching
+    // the group is not enough.
+    disposeObject3D(this.model.group)
     this.model = null
+    this.requestRender()
   }
 
   fit(preset = 'iso') {
@@ -215,6 +283,7 @@ export class ModelViewer {
     this.camera.updateProjectionMatrix()
     this.controls.target.copy(this.worldCenter)
     this.controls.update()
+    this.requestRender()
   }
 
   screenshot(name = 'model') {
@@ -227,7 +296,12 @@ export class ModelViewer {
   }
 
   dispose() {
-    cancelAnimationFrame(this.raf)
+    this.disposed = true
+    this.stopLoop()
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange)
+    }
+    this.controls.removeEventListener('change', this.onControlsChange)
     this.ro?.disconnect()
     window.removeEventListener('resize', this.resize)
     this.clearModel()

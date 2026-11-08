@@ -1,6 +1,7 @@
 // React components for both hosts. React is injected so the bundle never has to
 // resolve it through esbuild (the DSH loader supplies it at runtime).
 import { ModelViewer, parseModel, extOf } from './viewer.js'
+import { disposeObject3D } from './dispose.js'
 
 const TOOLBAR = [
   ['适配', 'fit'],
@@ -55,7 +56,14 @@ export function createComponents(React) {
       viewerRef.current = viewer
       setState({ kind: 'loading' })
       parseModel(buffer, ext).then((model) => {
-        if (!alive) return
+        if (!alive) {
+          // The effect was torn down while the model was still parsing: the
+          // viewer and its GL context are already gone, so release the
+          // geometry/materials/textures we just built instead of leaking them
+          // for the rest of the page's life.
+          disposeObject3D(model.group)
+          return
+        }
         viewer.setModel(model)
         setState({ kind: 'ready', triangles: model.triangles, size: model.size })
       }).catch((error) => {

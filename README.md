@@ -9,6 +9,8 @@
 
 STEP 用 `occt-import-js`（OpenCASCADE WASM）在浏览器里转网格；STL 与 GLB/GLTF 前端直接解析。**不依赖本机 Python/OCP，不写临时文件**。OpenCASCADE 的 wasm 已经内联进 `lib/client.js`（`wasmBinary` 传入），运行时不需要额外请求。
 
+`.gltf` 只接受自包含文件：`buffers` / `images` 里的 `uri` 必须是内嵌的 `data:` URI。引用外部 `.bin` 或贴图的 `.gltf` 会被拒绝并提示，避免以 DSH 页面同源身份去请求任意地址；`.glb` 不受影响。
+
 ## 安装
 
 ```bash
