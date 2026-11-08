@@ -6,11 +6,12 @@
 // Why CDP polling instead of `--dump-dom --virtual-time-budget`: the virtual
 // clock runs out during OpenCASCADE's wasm compile, so the page looks stuck.
 import { spawn } from 'node:child_process'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+// Override with CHROME_PATH on non-macOS installs or custom Chrome locations.
+const CHROME = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const args = process.argv.slice(2)
 const url = args[0]
 if (!url) {
@@ -21,9 +22,13 @@ const shotIndex = args.indexOf('--shot')
 const shotPath = shotIndex > -1 ? args[shotIndex + 1] : undefined
 const timeoutIndex = args.indexOf('--timeout')
 const timeoutMs = timeoutIndex > -1 ? Number(args[timeoutIndex + 1]) : 120000
-const port = 9333 + Math.floor(Math.random() * 200)
+let port = 0
 
+// `--remote-debugging-port=0` lets the OS pick a free port; Chrome reports it
+// in <profile>/DevToolsActivePort, which avoids collisions with the old random
+// 9333–9532 range.
 const profile = await mkdtemp(join(tmpdir(), 'dsh3d-chrome-'))
+let spawnError
 const chrome = spawn(CHROME, [
   '--headless=new',
   '--no-sandbox',
@@ -35,11 +40,32 @@ const chrome = spawn(CHROME, [
   '--enable-unsafe-swiftshader',
   '--window-size=960,760',
   `--user-data-dir=${profile}`,
-  `--remote-debugging-port=${port}`,
+  '--remote-debugging-port=0',
   'about:blank',
 ], { stdio: 'ignore' })
+chrome.once('error', (error) => { spawnError = error })
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function waitForDevToolsPort() {
+  const file = join(profile, 'DevToolsActivePort')
+  for (let i = 0; i < 150; i += 1) {
+    if (spawnError) throw new Error(`cannot start Chrome at ${CHROME}: ${spawnError.message}`)
+    if (chrome.exitCode !== null) {
+      throw new Error(`Chrome exited before opening the debugging port (code ${chrome.exitCode}); `
+        + `set CHROME_PATH if this is not the right binary: ${CHROME}`)
+    }
+    try {
+      const [first] = (await readFile(file, 'utf8')).split(/\r?\n/)
+      const parsed = Number(first)
+      if (Number.isInteger(parsed) && parsed > 0) return parsed
+    } catch {
+      // Chrome has not written the file yet.
+    }
+    await sleep(100)
+  }
+  throw new Error(`headless Chrome did not write DevToolsActivePort under ${profile}`)
+}
 
 async function endpoint(path) {
   const response = await fetch(`http://127.0.0.1:${port}${path}`)
@@ -55,7 +81,7 @@ async function waitForChrome() {
       await sleep(200)
     }
   }
-  throw new Error('headless Chrome did not expose the debugging port')
+  throw new Error(`headless Chrome did not expose the debugging port ${port}`)
 }
 
 class Cdp {
@@ -97,6 +123,7 @@ class Cdp {
 
 let exitCode = 1
 try {
+  port = await waitForDevToolsPort()
   await waitForChrome()
   const tabs = await endpoint('/json/list')
   const target = tabs.find((tab) => tab.type === 'page')
@@ -146,6 +173,19 @@ try {
 } catch (error) {
   console.error('driver error:', error && error.stack ? error.stack : error)
 } finally {
-  chrome.kill('SIGKILL')
+  // Kill first, wait for the process to go away, then delete the throwaway
+  // profile: the old version left one dsh3d-chrome-* directory per run in /tmp.
+  if (chrome.exitCode === null) {
+    chrome.kill('SIGKILL')
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 2000)
+      chrome.once('exit', () => { clearTimeout(timer); resolve() })
+    })
+  }
+  try {
+    await rm(profile, { recursive: true, force: true })
+  } catch (error) {
+    console.error(`could not remove Chrome profile ${profile}:`, error && error.message)
+  }
 }
 process.exit(exitCode)

@@ -2,6 +2,7 @@
 //   1. dsh-better-sidebar's file tree (registerFileViewer) — primary
 //   2. DSH's own document preview (documentPreviews + sidebar.right.tab.document) — fallback
 import { createComponents } from './body.js'
+import { attachTranslator } from './i18n.js'
 
 export const VIEWER_EXTS = ['step', 'stp', 'stl', 'glb', 'gltf']
 export const BODY_ID = 'dsh-3d-viewer:body'
@@ -14,9 +15,7 @@ function hostRoute(service, relative) {
 }
 
 export function createPlugin(React) {
-  const { SidebarBody, NativeBody } = createComponents(React)
-
-  function registerNative(ctx) {
+  function registerNative(ctx, { NativeBody }, t) {
     const registry = ctx.documentPreviews
     if (!registry || typeof registry.register !== 'function') throw new Error('documentPreviews 服务不存在')
     if (!ctx.slots || typeof ctx.slots.register !== 'function') throw new Error('slots 服务不存在')
@@ -26,7 +25,7 @@ export function createPlugin(React) {
       extensions: VIEWER_EXTS,
       binaryExtensions: VIEWER_EXTS,
       priority: 'extension',
-      title: () => '3D 模型',
+      title: () => t('title'),
       loading: 'bytes-complete',
       wrap: false,
     }), 'dsh-3d-viewer: native metadata')
@@ -37,11 +36,11 @@ export function createPlugin(React) {
     }, NativeBody)), 'dsh-3d-viewer: native body')
   }
 
-  function registerSidebar(service, effect) {
+  function registerSidebar(service, effect, { SidebarBody }, t) {
     if (!service || typeof service.registerFileViewer !== 'function') return false
     effect(() => service.registerFileViewer({
       id: VIEWER_ID,
-      title: '3D 模型',
+      title: t('title'),
       exts: VIEWER_EXTS,
       // above the builtin code catch-all (-100) and markdown/html (0)
       priority: 20,
@@ -60,6 +59,8 @@ export function createPlugin(React) {
   return {
     inject: ['slots'],
     apply(ctx) {
+      const t = attachTranslator(ctx)
+      const components = createComponents(React, t)
       // 两个宿主各走一个带 inject 的子 fiber:服务不存在时那一路自然不激活,
       // 也不会把整条插件拖死。注意不能直接读 ctx.documentPreviews ——
       // Cordis 对未声明 inject 的服务属性会抛 "cannot get property ... without inject"。
@@ -67,7 +68,7 @@ export function createPlugin(React) {
         if (typeof ctx.inject !== 'function') throw new Error('ctx.inject 不可用')
         ctx.inject(['slots', 'documentPreviews'], (scope) => {
           try {
-            registerNative(scope)
+            registerNative(scope, components, t)
           } catch (error) {
             console.warn('[dsh-3d-viewer] 原生文档预览未注册（软降级）：', error)
           }
@@ -84,7 +85,7 @@ export function createPlugin(React) {
           try {
             // a scoped ctx carries the service; effect may live on either ctx
             const effect = typeof scope.effect === 'function' ? scope.effect.bind(scope) : ctx.effect.bind(ctx)
-            registerSidebar(scope.betterSidebar ?? ctx.betterSidebar, effect)
+            registerSidebar(scope.betterSidebar ?? ctx.betterSidebar, effect, components, t)
           } catch (error) {
             console.warn('[dsh-3d-viewer] better-sidebar 文件预览器未注册（软降级）：', error)
           }

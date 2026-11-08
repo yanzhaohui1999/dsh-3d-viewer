@@ -11,6 +11,12 @@ STEP 用 `occt-import-js`（OpenCASCADE WASM）在浏览器里转网格；STL �
 
 `.gltf` 只接受自包含文件：`buffers` / `images` 里的 `uri` 必须是内嵌的 `data:` URI。引用外部 `.bin` 或贴图的 `.gltf` 会被拒绝并提示，避免以 DSH 页面同源身份去请求任意地址；`.glb` 不受影响。
 
+WebGL 上下文丢失（GPU 复位、驱动回收、标签页休眠）时会取消默认行为，恢复后重建渲染器并重新挂载模型，画布不会停在黑屏。
+
+## 语言
+
+工具栏、状态行、插件标题，以及「空文件 / 不支持 WebGL」提示支持中文与英文：装了 DSH 的 locale 服务时跟随宿主语言（设置 → 通用），没有宿主时按浏览器语言（`zh*` 用中文，其余用英文）；宿主语言切换后，新打开的预览使用新文案。解析器抛出的错误信息（STEP / STL / glTF）目前仍是中文诊断文本，见「没验证的部分」。
+
 ## 安装
 
 ```bash
@@ -94,6 +100,8 @@ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
 ```
 
 > 坑：`--virtual-time-budget + --dump-dom` 会在 OpenCASCADE 的 wasm 编译期间就把虚拟时间耗光，页面停在「解析中…」，看起来像解析卡死 —— 实际是测量方式的问题。真实时间下（CDP 轮询）两个页面都 PASS。
+>
+> 无头驱动默认可执行文件是 macOS 的 Google Chrome；Chrome 装在别处或换系统时用 `CHROME_PATH=/path/to/chrome` 指定。调试端口交给系统分配（`--remote-debugging-port=0`，端口号从 profile 的 `DevToolsActivePort` 读取），脚本结束会删掉临时 profile，不再在 `/tmp` 残留 `dsh3d-chrome-*`。
 
 ### 真实 GUI 验收（2026-11-03，隔离 profile）
 
@@ -113,22 +121,26 @@ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
 |---|---|
 | `src/client.js` | 入口：`window.__ModuleLoader__.load({ id, factory })`，只从 `require` 取 `react` |
 | `src/module.js` | 两套注册：better-sidebar 文件预览器 + 原生文档预览；都包在 try/catch 里软降级 |
-| `src/body.js` | React 组件（工具条 / 画布 / 底部读数），React 由外部注入 |
-| `src/viewer.js` | three.js 渲染器、正交相机、四种视图、STL/GLTF/STEP 解析 |
+| `src/body.js` | React 组件（工具条 / 画布 / 底部读数），React 与翻译函数由外部注入 |
+| `src/i18n.js` | 从 `locale/*.json` 取 UI 词表；注册宿主 locale 失败时回退到本地翻译 |
+| `src/viewer.js` | three.js 渲染器、正交相机、四种视图、STL/GLTF/STEP 解析、WebGL 上下文恢复 |
+| `src/context.js` | 纯逻辑的 `webglcontextlost` / `webglcontextrestored` 绑定（取消默认行为 + 可测） |
 | `src/format.js` | 纯路径辅助（`extOf`），不依赖 three/wasm，供 Node 单测直接 import |
 | `lib/client.js` | 构建产物（10.3 MB，含内联的 three 与 OCCT wasm），**提交进目录** |
 | `licenses/` | 随包分发的第三方许可文本（OCCT / occt-import-js，LGPL-2.1） |
 | `index.js` | host 半，空 `apply()` |
 | `cordis.patch.yml` | bundle 的 `insert:` 一行 |
-| `locale/{zh,en}.json` | 插件名与说明 |
+| `locale/{zh,en}.json` | 插件名、说明与 UI 文案（`meta` + `ui`） |
 | `icon.svg` | 插件图标 |
 | `scripts/build.mjs` | esbuild 构建（`--loader:.wasm=binary`、`--external:fs --external:path`） |
 | `scripts/verify-step.mjs` | Node 侧 STEP 验收 |
 | `scripts/test-extof.mjs` | `extOf` 单测（纯 Node，`npm test`） |
+| `scripts/test-context.mjs` | WebGL 上下文丢失/恢复事件绑定单测（模拟 canvas，无 GPU） |
+| `scripts/test-i18n.mjs` | locale 词表一致性、语言选择与宿主/本地回退单测 |
 | `scripts/smoke{,-entry}.js` + `smoke.html` | 浏览器侧解析验收（内联 wasm 走真实浏览器） |
 | `scripts/render-smoke.html` | 端到端渲染验收：真 React + 真 WebGL 挂载组件并喂真实 STEP |
 | `scripts/model-smoke.html` | STL / GLB 真文件渲染验收（`?file=` 指定，默认 `../samples/cube-10mm.stl`） |
-| `scripts/run-headless.mjs` | 无依赖 CDP 驱动：拉起无头 Chrome、等 `#out` 出结果、可选截图 |
+| `scripts/run-headless.mjs` | 无依赖 CDP 驱动：拉起无头 Chrome（可用 `CHROME_PATH` 覆盖）、OS 分配端口、结束清理 profile |
 | `scripts/vendor/` | 离线验收页用的 React 18.2 UMD（MIT，非插件依赖） |
 | `samples/` | 10 mm 立方体样例（STEP + STL），验收与示例用 |
 
@@ -137,7 +149,7 @@ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
 ```bash
 npm ci            # 装 devDependencies（esbuild 已精确钉到 0.25.0）
 npm run build     # 产出 lib/client.js，只调用本地 esbuild，不再走 npx / 联网
-npm test          # 纯 Node 单测（extOf / 资源释放 / .gltf 策略 / 缩放 / 大小上限）
+npm test          # 纯 Node 单测（extOf / 资源释放 / .gltf 策略 / 缩放 / 大小上限 / 上下文恢复 / 文案词表）
 npm run verify    # Node 侧 STEP 验收
 ```
 
@@ -164,4 +176,5 @@ npm run verify    # Node 侧 STEP 验收
 - **压缩过的 GLB/GLTF**：只验过未压缩的 `LeePerrySmith.glb`；带 DRACO / KTX2 压缩的模型会失败（没接解码器）。
 - **深色主题适配**：画布背景写死 `#11161c`，不跟随宿主主题（宿主切浅色时面板仍是深色）。
 - **单位**：底部读数一律写 `mm` —— 对 STEP/STL 成立；glTF 规范没有单位，那串数字只是模型空间尺寸。
+- **解析错误文案**：工具栏/状态行已中英双语，但 STEP / STL / glTF 解析失败时的错误信息仍是中文诊断文本（只在失败时出现）。
 - **其它 DSH 版本**：只在 0.2.1-rc.3 + better-sidebar 0.28.0 上验过。

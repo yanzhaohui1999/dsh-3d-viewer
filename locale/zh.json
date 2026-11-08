@@ -2,5 +2,18 @@
   "meta": {
     "title": "3D 模型查看器",
     "description": "在侧栏里直接打开 STEP / STP / STL / GLB / GLTF 模型。"
+  },
+  "ui": {
+    "title": "3D 模型",
+    "fit": "适配",
+    "front": "前",
+    "top": "顶",
+    "side": "侧",
+    "iso": "等轴",
+    "shot": "截图",
+    "loading": "解析中…",
+    "stats": "{triangles} 三角面 · {size} mm",
+    "noContent": "没有读到文件内容",
+    "webglUnavailable": "当前环境不支持 WebGL"
   }
 }

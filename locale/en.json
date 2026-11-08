@@ -2,5 +2,18 @@
   "meta": {
     "title": "3D Model Viewer",
     "description": "Open STEP / STP / STL / GLB / GLTF models directly in the sidebar."
+  },
+  "ui": {
+    "title": "3D model",
+    "fit": "Fit",
+    "front": "Front",
+    "top": "Top",
+    "side": "Side",
+    "iso": "Iso",
+    "shot": "Screenshot",
+    "loading": "Loading…",
+    "stats": "{triangles} triangles · {size} mm",
+    "noContent": "No file content was received",
+    "webglUnavailable": "WebGL is not available in this environment"
   }
 }

@@ -42,13 +42,16 @@
     },
     "client": {
       "platform": "web",
-      "immediately": true
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
   },
   "scripts": {
     "build": "node scripts/build.mjs",
     "verify": "node scripts/verify-step.mjs",
-    "test": "node scripts/test-extof.mjs && node scripts/test-viewer.mjs && node scripts/test-fit.mjs && node scripts/test-limits.mjs",
+    "test": "node scripts/test-extof.mjs && node scripts/test-viewer.mjs && node scripts/test-fit.mjs && node scripts/test-limits.mjs && node scripts/test-context.mjs && node scripts/test-i18n.mjs",
     "build:smoke": "esbuild scripts/smoke-entry.js --bundle --format=iife --platform=browser --minify --loader:.wasm=binary --external:fs --external:path --outfile=scripts/smoke.bundle.js"
   },
   "peerDependencies": {

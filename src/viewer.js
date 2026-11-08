@@ -7,6 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import occtimportjs from 'occt-import-js'
 import occtWasm from 'occt-import-js/dist/occt-import-js.wasm'
 import { disposeObject3D } from './dispose.js'
+import { installContextRecovery } from './context.js'
 import { radiusFor } from './fit.js'
 import { assertSelfContainedGltf } from './gltf.js'
 import { assertFileSize } from './limits.js'
@@ -132,10 +133,7 @@ export async function parseModel(buffer, ext) {
 export class ModelViewer {
   constructor(container) {
     this.container = container
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2))
-    this.renderer.setSize(container.clientWidth || 1, container.clientHeight || 1, false)
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    this.renderer = this.createRenderer()
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
@@ -144,11 +142,10 @@ export class ModelViewer {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10000)
     this.camera.up.set(0, 1, 0)
 
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement)
-    this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.08
-    this.controls.screenSpacePanning = true
-    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
+    // OrbitControls dispatches 'change' from its own pointer/wheel handlers;
+    // that is what wakes the idle render loop back up.
+    this.onControlsChange = () => this.requestRender()
+    this.controls = this.createControls(this.renderer.domElement)
 
     this.scene.add(new THREE.HemisphereLight(0xdfe9f5, 0x2b3440, 2.2))
     const key = new THREE.DirectionalLight(0xffffff, 2.0)
@@ -166,13 +163,18 @@ export class ModelViewer {
     this.raf = 0
     this.needsRender = true
     this.disposed = false
+    this.contextLost = false
     this.loop = this.loop.bind(this)
     this.resize = this.resize.bind(this)
     this.onVisibilityChange = this.onVisibilityChange.bind(this)
-    this.onControlsChange = () => this.requestRender()
-    // OrbitControls dispatches 'change' from its own pointer/wheel handlers;
-    // that is what wakes the idle render loop back up.
-    this.controls.addEventListener('change', this.onControlsChange)
+    this.onContextLost = this.onContextLost.bind(this)
+    this.onContextRestored = this.onContextRestored.bind(this)
+    // The lost event must be cancelled for the browser to restore the context;
+    // installContextRecovery() does that before calling our handlers.
+    this.stopContextRecovery = installContextRecovery(this.renderer.domElement, {
+      onLost: this.onContextLost,
+      onRestored: this.onContextRestored,
+    })
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.onVisibilityChange)
     }
@@ -183,6 +185,24 @@ export class ModelViewer {
     } else {
       window.addEventListener('resize', this.resize)
     }
+  }
+
+  createRenderer() {
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2))
+    renderer.setSize(this.container.clientWidth || 1, this.container.clientHeight || 1, false)
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    return renderer
+  }
+
+  createControls(domElement) {
+    const controls = new OrbitControls(this.camera, domElement)
+    controls.enableDamping = true
+    controls.dampingFactor = 0.08
+    controls.screenSpacePanning = true
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
+    controls.addEventListener('change', this.onControlsChange)
+    return controls
   }
 
   /** Hidden tabs must not keep rendering (rAF is throttled, but still wakes up). */
@@ -196,7 +216,7 @@ export class ModelViewer {
   }
 
   startLoop() {
-    if (this.disposed || this.raf || !this.isVisible()) return
+    if (this.disposed || this.contextLost || this.raf || !this.isVisible()) return
     this.raf = requestAnimationFrame(this.loop)
   }
 
@@ -211,9 +231,63 @@ export class ModelViewer {
     else this.stopLoop()
   }
 
+  onContextLost() {
+    // The event was already cancelled by installContextRecovery(); without that
+    // the browser never fires webglcontextrestored.
+    this.contextLost = true
+    this.stopLoop()
+  }
+
+  onContextRestored() {
+    if (this.disposed) return
+    try {
+      this.rebuildRenderer()
+    } catch (error) {
+      // Keep the panel usable for the next mount instead of throwing out of a
+      // browser event handler.
+      console.warn('[dsh-3d-viewer] WebGL 上下文恢复失败：', error)
+      return
+    }
+    this.contextLost = false
+    this.restoreModel()
+    this.requestRender()
+  }
+
+  /** Swap in a fresh renderer/controls after the old GL context was lost. */
+  rebuildRenderer() {
+    const previous = this.renderer
+    const next = this.createRenderer()
+    if (previous.domElement.parentNode) previous.domElement.replaceWith(next.domElement)
+    else this.container.appendChild(next.domElement)
+    this.stopContextRecovery?.()
+    previous.dispose()
+    this.renderer = next
+    this.stopContextRecovery = installContextRecovery(next.domElement, {
+      onLost: this.onContextLost,
+      onRestored: this.onContextRestored,
+    })
+    // OrbitControls binds pointer listeners to the old canvas; recreate it
+    // against the new one while keeping the camera and its target.
+    const target = this.controls.target.clone()
+    this.controls.removeEventListener('change', this.onControlsChange)
+    this.controls.dispose()
+    this.controls = this.createControls(next.domElement)
+    this.controls.target.copy(target)
+    this.controls.update()
+    this.applyFrustum()
+  }
+
+  /** Reattach the CPU-side model so the fresh renderer uploads it again. */
+  restoreModel() {
+    if (!this.model) return
+    this.root.clear()
+    this.attachModel(this.model)
+    this.applyFrustum()
+  }
+
   loop() {
     this.raf = 0
-    if (this.disposed || !this.isVisible()) return
+    if (this.disposed || this.contextLost || !this.isVisible()) return
     // OrbitControls.update() returns true only while the camera is actually
     // moving (including damping), so an idle panel can stop redrawing instead
     // of burning 60 fps forever.
@@ -228,6 +302,9 @@ export class ModelViewer {
   }
 
   resize() {
+    // Resizing a lost context throws/warns; rebuildRenderer() picks up the
+    // current container size when the context comes back.
+    if (this.contextLost) return
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
     this.renderer.setSize(w, h, false)
@@ -250,12 +327,7 @@ export class ModelViewer {
   setModel(model) {
     this.clearModel()
     this.model = model
-    // CAD formats arrive Z-up; three.js is Y-up. glTF is already Y-up, so it must
-    // not be rotated. The reported size stays in the file's own space either way.
-    const wrapper = new THREE.Group()
-    wrapper.add(model.group)
-    if (model.zUp) wrapper.rotation.x = -Math.PI / 2
-    this.root.add(wrapper)
+    const wrapper = this.attachModel(model)
     const worldBox = new THREE.Box3().setFromObject(wrapper)
     this.worldCenter = worldBox.getCenter(new THREE.Vector3())
     const worldSize = worldBox.getSize(new THREE.Vector3())
@@ -263,6 +335,17 @@ export class ModelViewer {
     this.applyFrustum()
     this.fit('iso')
     this.requestRender()
+  }
+
+  /** Add a model group to the scene, applying the CAD Z-up → Y-up rotation. */
+  attachModel(model) {
+    // CAD formats arrive Z-up; three.js is Y-up. glTF is already Y-up, so it must
+    // not be rotated. The reported size stays in the file's own space either way.
+    const wrapper = new THREE.Group()
+    wrapper.add(model.group)
+    if (model.zUp) wrapper.rotation.x = -Math.PI / 2
+    this.root.add(wrapper)
+    return wrapper
   }
 
   clearModel() {
@@ -303,6 +386,7 @@ export class ModelViewer {
   dispose() {
     this.disposed = true
     this.stopLoop()
+    this.stopContextRecovery?.()
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.onVisibilityChange)
     }

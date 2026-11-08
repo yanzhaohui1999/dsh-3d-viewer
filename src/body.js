@@ -2,15 +2,10 @@
 // resolve it through esbuild (the DSH loader supplies it at runtime).
 import { ModelViewer, parseModel, extOf } from './viewer.js'
 import { disposeObject3D } from './dispose.js'
+import { createTranslator } from './i18n.js'
 
-const TOOLBAR = [
-  ['适配', 'fit'],
-  ['前', 'front'],
-  ['顶', 'top'],
-  ['侧', 'side'],
-  ['等轴', 'iso'],
-  ['截图', 'shot'],
-]
+// Labels come from locale/{zh,en}.json through the translator passed by module.js.
+const TOOLBAR = ['fit', 'front', 'top', 'side', 'iso', 'shot']
 
 function toArrayBuffer(data) {
   if (!data) return undefined
@@ -24,7 +19,7 @@ function basename(path) {
   return clean.slice(clean.lastIndexOf('/') + 1) || 'model'
 }
 
-export function createComponents(React) {
+export function createComponents(React, t = createTranslator()) {
   const { useEffect, useRef, useState, useMemo, createElement: h } = React
 
   function ViewerSurface({ bytes, path }) {
@@ -38,7 +33,7 @@ export function createComponents(React) {
       const host = hostRef.current
       if (!host) return undefined
       if (!buffer) {
-        setState({ kind: 'error', message: '没有读到文件内容' })
+        setState({ kind: 'error', message: t('noContent') })
         return undefined
       }
       let alive = true
@@ -50,7 +45,7 @@ export function createComponents(React) {
         // disabled, headless host, browser policy). If that escapes the effect
         // the panel stays on 「解析中…」 forever, so surface it instead.
         console.warn('[dsh-3d-viewer] WebGL 初始化失败：', error)
-        setState({ kind: 'error', message: '当前环境不支持 WebGL' })
+        setState({ kind: 'error', message: t('webglUnavailable') })
         return undefined
       }
       viewerRef.current = viewer
@@ -92,9 +87,11 @@ export function createComponents(React) {
     }
 
     const size = state.kind === 'ready'
-      ? `${state.size.map((n) => n.toFixed(2)).join(' × ')} mm`
+      ? state.size.map((n) => n.toFixed(2)).join(' × ')
       : ''
-    const stats = state.kind === 'ready' ? `${state.triangles} 三角面 · ${size}` : ''
+    const stats = state.kind === 'ready'
+      ? t('stats', { triangles: state.triangles, size })
+      : ''
 
     return h('div', {
       style: {
@@ -108,7 +105,7 @@ export function createComponents(React) {
         display: 'flex', alignItems: 'center', gap: 4, padding: '4px 6px',
         borderBottom: '1px solid #1f2833', flex: '0 0 auto',
       },
-    }, TOOLBAR.map(([label, kind]) => h('button', {
+    }, TOOLBAR.map((kind) => h('button', {
       key: kind,
       type: 'button',
       onClick: () => act(kind),
@@ -116,7 +113,7 @@ export function createComponents(React) {
         padding: '2px 8px', borderRadius: 4, border: '1px solid #263241',
         background: '#161d26', color: '#c9d4e0', cursor: 'pointer', font: 'inherit',
       },
-    }, label))),
+    }, t(kind)))),
     h('div', { ref: hostRef, style: { position: 'relative', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' } }),
     h('div', {
       style: {
@@ -126,7 +123,7 @@ export function createComponents(React) {
       },
     }, state.kind === 'error'
       ? state.message
-      : state.kind === 'ready' ? stats : '解析中…'))
+      : state.kind === 'ready' ? stats : t('loading')))
   }
 
   /** better-sidebar file viewer body: bytes come from our own load(). */
