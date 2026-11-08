@@ -8,9 +8,9 @@ import occtimportjs from 'occt-import-js'
 import occtWasm from 'occt-import-js/dist/occt-import-js.wasm'
 import { disposeObject3D } from './dispose.js'
 import { installContextRecovery } from './context.js'
-import { radiusFor } from './fit.js'
+import { clipPlanesFor, radiusFor } from './fit.js'
 import { assertSelfContainedGltf } from './gltf.js'
-import { assertFileSize } from './limits.js'
+import { assertFileSizeForExt } from './limits.js'
 
 // extOf lives in format.js so plain Node can unit-test it without importing
 // three.js or the wasm; re-exported here to keep viewer.js's surface unchanged.
@@ -67,8 +67,6 @@ function meshGroupFromOcct(result) {
 }
 
 async function parseCad(buffer) {
-  // Reject pathological files before initializing wasm / allocating meshes.
-  assertFileSize(buffer)
   const occt = await getOcct()
   // ReadStepFile is synchronous and can block for seconds on a large file.
   // Yield once so the browser can paint the 「解析中…」 state first.
@@ -80,7 +78,6 @@ async function parseCad(buffer) {
 }
 
 function parseStl(buffer) {
-  assertFileSize(buffer)
   const geometry = new STLLoader().parse(buffer)
   geometry.computeVertexNormals()
   const group = new THREE.Group()
@@ -99,14 +96,18 @@ function parseGltf(buffer) {
 /** Parse bytes into an unrotated model group plus its true (CAD-space) bounds. */
 export async function parseModel(buffer, ext) {
   const e = String(ext || '').toLowerCase()
+  // One cap for every format, applied before any decode/parse: .glb/.gltf used
+  // to bypass assertFileSize and a 100 MiB .gltf reached JSON.parse first
+  // (review 2026-11-08 fix5).
+  assertFileSizeForExt(buffer, e)
   let group
   if (e === 'step' || e === 'stp') group = await parseCad(buffer)
   else if (e === 'stl') group = parseStl(buffer)
   else if (e === 'glb' || e === 'gltf') {
-    // A .gltf may reference external .bin/texture files, which GLTFLoader would
-    // fetch with the DSH page's own origin. Only self-contained data: URIs are
-    // accepted; .glb carries its resources in the binary chunk and is exempt.
-    if (e === 'gltf') assertSelfContainedGltf(buffer)
+    // Content, not extension: three decides JSON vs GLB by the 'glTF' magic, so
+    // a JSON glTF renamed to .glb is still parsed as JSON and would fetch its
+    // external buffers/images. Scan the bytes we actually got, then parse.
+    assertSelfContainedGltf(buffer)
     group = await parseGltf(buffer)
   } else throw new Error(`不支持的格式 .${e}`)
 
@@ -363,11 +364,11 @@ export class ModelViewer {
     const presetDef = PRESETS[preset] || PRESETS.iso
     const dir = new THREE.Vector3(...presetDef.dir).normalize()
     const up = new THREE.Vector3(...presetDef.up).normalize()
-    const distance = this.radius * 4
+    const { distance, near, far } = clipPlanesFor(this.radius)
     this.camera.up.copy(up)
     this.camera.position.copy(this.worldCenter).add(dir.multiplyScalar(distance))
-    this.camera.near = 0.1
-    this.camera.far = distance * 4 + this.radius * 4
+    this.camera.near = near
+    this.camera.far = far
     this.camera.updateProjectionMatrix()
     this.controls.target.copy(this.worldCenter)
     this.controls.update()

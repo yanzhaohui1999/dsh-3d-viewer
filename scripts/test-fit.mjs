@@ -2,7 +2,7 @@
 // Plain Node, no three/wasm: radiusFor lives in ../src/fit.js precisely so this
 // file can import the real implementation. Run: npm test
 import assert from 'node:assert/strict'
-import { radiusFor } from '../src/fit.js'
+import { clipPlanesFor, radiusFor } from '../src/fit.js'
 
 let assertions = 0
 function close(actual, expected, label) {
@@ -24,6 +24,20 @@ close(radiusFor(10), 8, '10 mm sample keeps a similar framing to before (8.0 vs 
 
 ok(radiusFor(0.5) > 0.25, '0.5 mm model still fits inside the frustum')
 ok(radiusFor(500) > 250, '500 mm model still fits inside the frustum')
+
+// fix5 regression: fit() used a fixed near = 0.1 while the camera sits
+// distance = radius * 4 from the centre. A 0.02 mm cube is only ~0.048 units in
+// front of the camera — entirely inside the near plane — so it rendered black.
+for (const size of [0.02, 0.5, 500]) {
+  const radius = radiusFor(size)
+  const { distance, near, far } = clipPlanesFor(radius)
+  close(distance, radius * 4, `${size} mm: camera distance is 4x radius`)
+  ok(near > 0 && near < distance - radius, `${size} mm: near plane stays in front of the model`)
+  ok(far > distance + radius, `${size} mm: far plane stays behind the model`)
+}
+const tiny = clipPlanesFor(radiusFor(0.02))
+close(tiny.near, tiny.distance / 1000, 'near scales with camera distance instead of a fixed 0.1')
+ok(tiny.near < 0.1, '0.02 mm model clears the old fixed near plane')
 
 // Degenerate / invalid sizes keep a usable camera instead of a zero-height
 // frustum or NaNs.

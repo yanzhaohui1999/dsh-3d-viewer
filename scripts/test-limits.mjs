@@ -2,7 +2,7 @@
 // Plain Node, no three/wasm: assertFileSize lives in ../src/limits.js.
 // Run: npm test
 import assert from 'node:assert/strict'
-import { assertFileSize, MAX_FILE_BYTES } from '../src/limits.js'
+import { assertFileSize, assertFileSizeForExt, MAX_FILE_BYTES } from '../src/limits.js'
 
 let assertions = 0
 function ok(fn, label) {
@@ -39,6 +39,18 @@ throws(
 )
 ok(() => assertFileSize(null), 'missing buffer is left to the parser')
 assert.equal(MAX_FILE_BYTES, 64 * 1024 * 1024, 'default cap is 64 MiB')
+assertions += 1
+
+// fix5: .glb/.gltf now go through the same cap as STEP/STL, before JSON.parse.
+for (const ext of ['glb', 'gltf', 'GLB', 'GLTF', 'stl', 'step', 'stp']) {
+  throws(
+    () => assertFileSizeForExt({ byteLength: MAX_FILE_BYTES + 1 }, ext),
+    /文件过大/,
+    `.${ext} over the cap is rejected before parsing`,
+  )
+  ok(() => assertFileSizeForExt({ byteLength: MAX_FILE_BYTES }, ext), `.${ext} at the cap passes`)
+}
+assert.equal(assertFileSizeForExt({ byteLength: MAX_FILE_BYTES + 1 }, 'txt'), 0, 'unknown extension is left to the format error')
 assertions += 1
 
 console.log(`test-limits: ${assertions} assertions PASS`)

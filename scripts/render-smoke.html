@@ -20,6 +20,32 @@
 </script>
 <script src="../lib/client.js"></script>
 <script>
+// Count pixels that differ from the scene background (#11161c = 17,22,28).
+// The old centerPainted check sampled 8x8 pixels and PASSed a blank page; this
+// ratio is ~0 for an empty canvas (review 2026-11-08).
+async function pixelStats(canvas) {
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const w = canvas.width
+  const h = canvas.height
+  const copy = document.createElement('canvas')
+  copy.width = w
+  copy.height = h
+  const ctx = copy.getContext('2d')
+  ctx.drawImage(canvas, 0, 0)
+  const data = ctx.getImageData(0, 0, w, h).data
+  let lit = 0
+  let maxDelta = 0
+  for (let i = 0; i < data.length; i += 4) {
+    const delta = Math.max(
+      Math.abs(data[i] - 17),
+      Math.abs(data[i + 1] - 22),
+      Math.abs(data[i + 2] - 28),
+    )
+    if (delta > 24) lit += 1
+    if (delta > maxDelta) maxDelta = delta
+  }
+  return { lit, total: w * h, ratio: lit / (w * h), maxDelta }
+}
 (async () => {
   const out = document.getElementById('out')
   const say = (s) => { out.textContent = s }
@@ -56,17 +82,14 @@
       const text = (document.getElementById('root').innerText || '').replace(/\s+/g, ' ')
       if (/(三角面|triangles)/.test(text)) {
         const canvas = document.querySelector('#root canvas')
-        let painted = false
-        try {
-          const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
-          if (gl) {
-            const px = new Uint8Array(4 * 64)
-            gl.readPixels(canvas.width / 2 - 4, canvas.height / 2 - 4, 8, 8, gl.RGBA, gl.UNSIGNED_BYTE, px)
-            painted = px.some((v, idx) => idx % 4 !== 3 && v > 20)
-          }
-        } catch (e) {}
-        return say('RENDER PASS · canvas=' + (canvas ? canvas.width + 'x' + canvas.height : 'none')
-          + ' · centerPainted=' + painted + ' · ' + text.slice(0, 90))
+        if (!canvas) return say('RENDER FAIL · no canvas after ready state')
+        const stats = await pixelStats(canvas)
+        if (!(stats.ratio > 0.005 && stats.maxDelta > 40)) {
+          return say('RENDER FAIL · blank canvas · litRatio=' + stats.ratio.toFixed(4)
+            + ' maxDelta=' + stats.maxDelta + ' · ' + text.slice(0, 90))
+        }
+        return say('RENDER PASS · canvas=' + canvas.width + 'x' + canvas.height
+          + ' · litRatio=' + stats.ratio.toFixed(4) + ' · maxDelta=' + stats.maxDelta + ' · ' + text.slice(0, 90))
       }
       if (/失败|错误|Error/i.test(text)) return say('RENDER FAIL: ' + text.slice(0, 200))
     }

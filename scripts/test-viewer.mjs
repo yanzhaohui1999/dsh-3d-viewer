@@ -4,7 +4,7 @@
 // real implementations and drive them with mocks. Run: npm test
 import assert from 'node:assert/strict'
 import { disposeMaterial, disposeObject3D } from '../src/dispose.js'
-import { externalGltfUris, assertSelfContainedGltf } from '../src/gltf.js'
+import { externalGltfUris, assertSelfContainedGltf, isGlbBuffer } from '../src/gltf.js'
 
 let assertions = 0
 function ok(actual, expected, label) {
@@ -107,7 +107,8 @@ function mockNode(extra = {}) {
   ok(externalGltfUris({ images: [{ uri: 'blob:https://example.com/1' }] }).length, 1, 'blob url is external')
   ok(externalGltfUris({ buffers: [{ uri: 42 }] }).length, 1, 'non-string uri is rejected')
   ok(externalGltfUris({ shaders: [{ uri: 'shader.glsl' }] }).length, 1, 'shader uri is external')
-  ok(externalGltfUris({ buffers: [{ uri: '' }] }).length, 0, 'empty uri is not a fetch')
+  ok(externalGltfUris({ buffers: [{ uri: '' }] }).length, 1, 'empty uri is not inline: three fetches the document URL')
+  ok(externalGltfUris({ buffers: [{ uri: null }] }).length, 1, 'null uri is rejected too')
   ok(externalGltfUris({ buffers: [{ uri: '  DATA:application/octet-stream;base64,AA' }] }).length, 0, 'data: match ignores case/whitespace')
   ok(externalGltfUris({ buffers: 'not-a-list' }).length, 0, 'malformed resource list is ignored')
   ok(externalGltfUris(null).length, 0, 'null document yields no references')
@@ -140,6 +141,86 @@ function mockNode(extra = {}) {
     () => assertSelfContainedGltf(encode('\uFEFF' + JSON.stringify(selfContained))),
     'UTF-8 BOM is tolerated',
   )
+}
+
+// ---------------------------------------------------------------------------
+// fix5: the policy must follow the bytes, not the extension. three branches on
+// the 'glTF' magic, so the JSON chunk of a GLB (including images[].uri) is
+// scanned too, and a JSON glTF renamed to .glb goes through the same check.
+// ---------------------------------------------------------------------------
+const GLB_JSON_CHUNK = 0x4e4f534a
+const GLB_BIN_CHUNK = 0x004e4942
+
+function paddedJson(value) {
+  const raw = new TextEncoder().encode(JSON.stringify(value))
+  const padded = new Uint8Array(Math.ceil(raw.length / 4) * 4)
+  padded.set(raw)
+  padded.fill(0x20, raw.length) // spec: the JSON chunk is padded with spaces
+  return padded
+}
+
+function buildGlb(chunks) {
+  const total = 12 + chunks.reduce((sum, chunk) => sum + 8 + chunk.data.byteLength, 0)
+  const out = new Uint8Array(total)
+  const view = new DataView(out.buffer)
+  out.set([0x67, 0x6c, 0x54, 0x46]) // 'glTF'
+  view.setUint32(4, 2, true)
+  view.setUint32(8, total, true)
+  let offset = 12
+  for (const { type, data } of chunks) {
+    view.setUint32(offset, data.byteLength, true)
+    view.setUint32(offset + 4, type, true)
+    out.set(data, offset + 8)
+    offset += 8 + data.byteLength
+  }
+  return out
+}
+
+function glbFromJson(json, bin) {
+  const chunks = [{ type: GLB_JSON_CHUNK, data: paddedJson(json) }]
+  if (bin) chunks.push({ type: GLB_BIN_CHUNK, data: bin })
+  return buildGlb(chunks)
+}
+
+{
+  const jsonDoc = (value) => new TextEncoder().encode(JSON.stringify(value))
+  const selfContainedGlb = glbFromJson(
+    { asset: { version: '2.0' }, buffers: [{ byteLength: 12 }] },
+    new Uint8Array(12),
+  )
+  ok(isGlbBuffer(selfContainedGlb), true, 'GLB magic is detected from the bytes')
+  ok(isGlbBuffer(jsonDoc({ asset: { version: '2.0' } })), false, 'JSON glTF is not mistaken for GLB')
+  doesNotThrow(() => assertSelfContainedGltf(selfContainedGlb), 'self-contained GLB with a BIN chunk passes')
+
+  throws(
+    () => assertSelfContainedGltf(glbFromJson({ asset: { version: '2.0' }, buffers: [{ uri: 'scene.bin' }] })),
+    /buffers\[0\]/,
+    'GLB JSON chunk buffer uri is rejected',
+  )
+  throws(
+    () => assertSelfContainedGltf(glbFromJson({ asset: { version: '2.0' }, images: [{ uri: 'textures/a.png' }] })),
+    /images\[0\]/,
+    'GLB JSON chunk images[].uri is rejected',
+  )
+  doesNotThrow(
+    () => assertSelfContainedGltf(glbFromJson({ asset: { version: '2.0' }, images: [{ uri: 'data:image/png;base64,AA' }] })),
+    'data: image inside a GLB passes',
+  )
+
+  // three keeps scanning and parses the *last* JSON chunk; a clean first chunk
+  // must not hide an external second one.
+  const twoJsonChunks = buildGlb([
+    { type: GLB_JSON_CHUNK, data: paddedJson({ asset: { version: '2.0' } }) },
+    { type: GLB_JSON_CHUNK, data: paddedJson({ asset: { version: '2.0' }, buffers: [{ uri: 'scene.bin' }] }) },
+  ])
+  throws(() => assertSelfContainedGltf(twoJsonChunks), /buffers\[0\]/, 'the last JSON chunk is the one three parses and is checked')
+
+  // The blind-audit bypass: the same JSON document, handed to the viewer with a
+  // .glb path. The guard never sees the filename, so the bytes alone reject it
+  // before GLTFLoader exists — no fetch can be issued.
+  const renamed = jsonDoc({ asset: { version: '2.0' }, buffers: [{ uri: 'scene.bin', byteLength: 12 }] })
+  throws(() => assertSelfContainedGltf(renamed), /内嵌资源/, 'JSON glTF renamed to .glb is rejected by the same bytes-only policy')
+  ok(isGlbBuffer(renamed), false, 'renamed JSON glTF carries no GLB magic')
 }
 
 console.log(`test-viewer: ${assertions} assertions PASS`)

@@ -70,15 +70,17 @@ PASS triangles=12 size=10.00 x 10.00 x 10.00
 端到端渲染也验过：`scripts/render-smoke.html` 用真 React + 真 WebGL 把 `registerFileViewer` 注册到的那个组件挂起来，喂真实 STEP 字节：
 
 ```
-RENDER PASS · canvas=900x544 · centerPainted=true · 12 三角面 · 10.00 × 10.00 × 10.00 mm
+RENDER PASS · canvas=900x544 · litRatio=0.4060 · maxDelta=156 · 12 三角面 · 10.00 × 10.00 × 10.00 mm
 ```
 
 STL / GLB 用 `scripts/model-smoke.html` 跑真文件（同一份 bundle、真 React + 真 WebGL；不带参数默认跑 STL 样例）：
 
 ```
 $ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
-PASS · cube-10mm.stl · canvas=900x504 · centerPainted=true · 12 三角面 · 10.00 × 10.00 × 10.00 mm
+PASS · cube-10mm.stl · canvas=900x504 · litRatio=0.3769 · maxDelta=156 · 12 三角面 · 10.00 × 10.00 × 10.00 mm
 ```
+
+`litRatio` 是按画布全像素统计的「与背景色不同的像素占比」；空白画布约为 0，旧版 8×8 `centerPainted` 阈值会把空白页也判 PASS。
 
 GLB 用 `?file=` 指到你自己的文件，例如：
 
@@ -86,6 +88,8 @@ GLB 用 `?file=` 指到你自己的文件，例如：
 $ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html?file=../models/model.glb"
 PASS · model.glb · ...
 ```
+
+`?cube=<size>` 在页面里生成对应边长的 STL 立方体，`?mode=renamed-glb` / `?mode=external-glb` 在内存里构造带外部 URI 的 JSON glTF / GLB 容器；后两者用来验证「按内容拒绝外部 URI 且不发起请求」，输出里会带 `scene.bin requests=0` / `texture.png requests=0`。
 
 截图在 `docs/stl-acceptance.png` 与 `docs/glb-acceptance.png`；后者用的是 three.js 示例模型 `LeePerrySmith.glb`（不在仓库里）。GLB 这条第一次跑出来人头是躺着的 —— 原实现对所有格式都套了 CAD 的 Z-up → Y-up 旋转（`wrapper.rotation.x = -90°`），而 glTF 按规范已经是 Y-up。已改成只对 STEP/STL 旋转（`zUp` 标记），重跑后头是正的。
 
