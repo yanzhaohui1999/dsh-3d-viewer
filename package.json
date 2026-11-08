@@ -48,8 +48,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "verify": "node scripts/verify-step.mjs",
-    "test": "node scripts/test-extof.mjs && node scripts/test-viewer.mjs",
-    "build:smoke": "npm_config_cache=/tmp/npm-cache npx --yes esbuild@0.25.0 scripts/smoke-entry.js --bundle --format=iife --platform=browser --minify --loader:.wasm=binary --external:fs --external:path --outfile=scripts/smoke.bundle.js"
+    "test": "node scripts/test-extof.mjs && node scripts/test-viewer.mjs && node scripts/test-fit.mjs && node scripts/test-limits.mjs",
+    "build:smoke": "esbuild scripts/smoke-entry.js --bundle --format=iife --platform=browser --minify --loader:.wasm=binary --external:fs --external:path --outfile=scripts/smoke.bundle.js"
   },
   "peerDependencies": {
     "dsh-better-sidebar": ">=0.19.0"
@@ -60,6 +60,7 @@
     }
   },
   "devDependencies": {
+    "esbuild": "0.25.0",
     "three": "0.169.0",
     "occt-import-js": "0.0.23"
   }

@@ -7,7 +7,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import occtimportjs from 'occt-import-js'
 import occtWasm from 'occt-import-js/dist/occt-import-js.wasm'
 import { disposeObject3D } from './dispose.js'
+import { radiusFor } from './fit.js'
 import { assertSelfContainedGltf } from './gltf.js'
+import { assertFileSize } from './limits.js'
 
 // extOf lives in format.js so plain Node can unit-test it without importing
 // three.js or the wasm; re-exported here to keep viewer.js's surface unchanged.
@@ -64,6 +66,8 @@ function meshGroupFromOcct(result) {
 }
 
 async function parseCad(buffer) {
+  // Reject pathological files before initializing wasm / allocating meshes.
+  assertFileSize(buffer)
   const occt = await getOcct()
   // ReadStepFile is synchronous and can block for seconds on a large file.
   // Yield once so the browser can paint the 「解析中…」 state first.
@@ -75,6 +79,7 @@ async function parseCad(buffer) {
 }
 
 function parseStl(buffer) {
+  assertFileSize(buffer)
   const geometry = new STLLoader().parse(buffer)
   geometry.computeVertexNormals()
   const group = new THREE.Group()
@@ -254,7 +259,7 @@ export class ModelViewer {
     const worldBox = new THREE.Box3().setFromObject(wrapper)
     this.worldCenter = worldBox.getCenter(new THREE.Vector3())
     const worldSize = worldBox.getSize(new THREE.Vector3())
-    this.radius = Math.max(worldSize.x, worldSize.y, worldSize.z) * 0.75 + 1
+    this.radius = radiusFor(Math.max(worldSize.x, worldSize.y, worldSize.z))
     this.applyFrustum()
     this.fit('iso')
     this.requestRender()

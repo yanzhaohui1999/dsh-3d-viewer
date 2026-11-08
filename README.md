@@ -20,7 +20,7 @@ dsh plugin --profile web add .
 
 这条命令会同时把包写进 `dependencies` 和 `dsh.profile.bundles`（2026-11-03 在 DSH 0.2.1-rc.3 上实测：`pnpm add` 之后 bundles 自动多了 `dsh-3d-viewer`）。也可以在 Web 里「插件」→「添加插件」→ 本地目录填同一个路径。
 
-`lib/client.js` 已构建并随目录提交，**装之前不需要 `npm install` 或构建**；`three` / `occt-import-js` 是 `devDependencies`，只给重新构建用，安装时不会带进 profile。
+`lib/client.js` 已构建并随目录提交，**装之前不需要 `npm install` 或构建**；`three` / `occt-import-js` / `esbuild` 是 `devDependencies`，只给重新构建用，安装时不会带进 profile。
 
 > 依赖版本：`dsh-better-sidebar` 请用 **0.28.x**。0.24.1 在 DSH 0.2.1 上会停在 `pending (waiting for service: webRuntime)` —— 那个服务在 0.2.1-rc.1 已改名为 `webStartup`。
 
@@ -135,10 +135,13 @@ node scripts/run-headless.mjs "http://127.0.0.1:8098/scripts/model-smoke.html"
 ## 构建
 
 ```bash
-npm run build     # 产出 lib/client.js
-npm test          # extOf 单测（纯 Node）
+npm ci            # 装 devDependencies（esbuild 已精确钉到 0.25.0）
+npm run build     # 产出 lib/client.js，只调用本地 esbuild，不再走 npx / 联网
+npm test          # 纯 Node 单测（extOf / 资源释放 / .gltf 策略 / 缩放 / 大小上限）
 npm run verify    # Node 侧 STEP 验收
 ```
+
+构建只依赖 `package-lock.json` 里的 esbuild，`npm ci` 之后可在离线 npm cache（如 `npm_config_cache=/tmp/npm-cache`）下复现；esbuild 失败时会打印它自己的 stderr。
 
 `fs` / `path` 被标成 external：它们只出现在 emscripten 的 node-only 分支里，浏览器不会执行到；不标会让 esbuild 因为 Node 内建模块报错。
 
